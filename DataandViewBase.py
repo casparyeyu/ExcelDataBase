@@ -34,24 +34,19 @@ def judgeIfcomeinNew(path, tablefile):
 def getTableInfoFromFileName(filename, sheetName=0):
     """
     用于建立“文件名+sheet名”到“数据库表名”的映射关系。
-    filename为文件的绝对路径; home_path用来获取根目录，用于支持子文件夹的情况; name为文件名或二级子目录+文件名；
-    sheetName=0,表示不要求填sheetName,直接取默认的第1个Sheet,用于获取配置信息、或读文件时sheetName为空的情况。
-    返回：
-    target_info:{'表名':最终的登记表名,'会计期间':会计期间,'其他信息':其他信息,}, 用于根据文件名对应到表名，生成配置文件
-    config_info:{'起始行':, '指定列':'', '是否有标题行':, '是否有汇总行':}, 用于实际读取数据时
+    Inputs:
+        filename为文件的绝对路径; 从配置文件中提取home_path作为根目录，用于支持子文件夹的情况; name为文件名或二级子目录+文件名；
+        sheetName=0,表示不要求填sheetName,直接取默认的第1个Sheet,用于获取配置信息、或读文件时sheetName为空的情况。
+    Returs：
+        target_info:{'表名':最终的登记表名,'其他信息':其他信息}, 用于根据文件名对应到表名，生成配置文件；其他信息将作为数据表的新增列，可以实现将文件名中的信息或其他固定信息作为数据列，如员工姓名、记录日期等。
+        config_info:{'起始行':, '指定列':'', '是否有标题行':, '是否有汇总行':}, 用于实际读取数据时
     """
     config = ConfigParser()
     config.read(os.path.join(os.path.dirname(__file__),'config\\config.ini'), encoding='utf-8')
-    if config.get("public_config","using_file")=='True':
-        df_config = pd.read_excel(os.path.join(config.get("public_config","config_path"), config.get("public_config","data_decode_file")),keep_default_na=False) 
-    else:
-        df_config = pd.DataFrame(get_opsData(config["public_config_ops"]["appkey"],config["public_config_ops"]["sign"],config["public_config_ops"]["data_decode"].split(',')[0],config["public_config_ops"]["data_decode"].split(',')[1]))
-        df_config.drop(columns=['创建时间','创建人','拥有者','uaid','最近修改时间','autoid','wfftime','allowdelete','controlpermissions'],inplace=True)
-    #data_dir的配置为：项目 = 目录,密码   或   ps.项目=ops的地址,sign,key
+    df_config = pd.read_excel(os.path.join(config.get("public_config","config_path"), config.get("public_config","data_decode_file")),keep_default_na=False) 
     all_paths = config.items("data_dir")
     home_path = ''
     #home_path为选中的data_dir对应的目录，即文件所属的根目录，当文件属于该文件夹或该文件夹的子文件夹时，循环终止
-    #print(filename)
     for path in all_paths:
         #print(path[1])
         if path[1].split(',')[0] in filename:
@@ -63,8 +58,6 @@ def getTableInfoFromFileName(filename, sheetName=0):
     target_config = df_config[df_config['文件名格式'].apply(lambda x: True if re.findall(x, name) else False) & df_config['sheetName'].apply(lambda x:True if (x==sheetName and sheetName!=0 or sheetName==0) else False)].reset_index(drop=True)
     target_info = {}
     config_info = {}
-
-    #print(home_path, name, target_config)
     
     if len(target_config)==0:
         #表示没有进行配置的表，按通用简单表格文件处理
@@ -78,56 +71,56 @@ def getTableInfoFromFileName(filename, sheetName=0):
         #根据表名信息，对其他信息进行替换
         for i in range(len(nameinfo)):
             row['表名'] = row['表名'].replace('\\'+str(i+1),nameinfo[i])
-            row['会计期间'] = row['会计期间'].replace('\\'+str(i+1),nameinfo[i])
             row['其他信息'] = row['其他信息'].replace('\\'+str(i+1),nameinfo[i])
-        #print(name, nameinfo, row['表名'], row['会计期间'], row['其他信息'])
         target_info['表名'] = row['表名']
         target_info['sheetName'] = row['sheetName'] 
-        if row['会计期间']:
-            target_info['会计期间'] = row['会计期间']
         if row['其他信息']:
             target_info.update(eval(row['其他信息']))
         
         default = {'起始行':1,'指定列':None,'是否有标题行':'是','是否有汇总行':'否'}
         for i, v in row.items():
-            if i not in ['表名','文件名格式','会计期间','其他信息','sheetName']:
+            if i not in ['表名','文件名格式','其他信息','sheetName']:
                 config_info[i] = default[i] if pd.isna(v) else v
         target_info_list.append((target_info,config_info))
     return target_info_list
 
 def listDataDir(path, res, home_path):
     '''
+    递归遍历数据目录下的所有Excel或CSV文件，将“文件->数据库表名”转换为“数据库表名->文件1|文件2|文件3”
+    Inpust:
+        path:某个文件夹
+        res:实际返回的数据结构
+        homepath:用于进行数据分类管理（取数据文件所在一级子文件夹作为分类名）
     Returns:
-    database={table1:{'parent':'\子目录','files':{key1:file1,key2:file2}}
-    DataBase的结构:
-    1)有哪些数据表
-    2)每个数据表对应的文件列表，不同文件的区分方式
-    与原Excel组织方式的不同：不再关心数据的层次关系，即不再关系目录
+        res={table1:{'parent':'\子目录','files':{key1:file1,key2:file2}}
+        res的结构:
+            1)有哪些数据表
+            2)每个数据表对应的文件列表，不同文件的区分方式
+            3)parent是文件夹的名称，用于进行数据分类，便于展示。
+            与原Excel组织方式的不同：不再关心数据的层次关系，即不再关心目录
     '''
-    if path[:4]!='http':
-        dirlist = os.listdir(path.split(',')[0])
-        dirlist = list(filter(lambda x:'.json' not in x and 'bak' not in x and 'Bak' not in x and 'BAK' not in x and '~' not in x and '表格解析配置' not in x, dirlist))
-        for f in natsort.natsorted(dirlist):
-            temp_path = os.path.join(path.split(',')[0], f)
-            if os.path.isdir(temp_path):
-                listDataDir(temp_path, res, home_path)
-            else:
-                #print(temp_path)
-                for info in getTableInfoFromFileName(temp_path):
-                    fileinfo = info[0]
-                    #print(fileinfo)
-                    if fileinfo['表名'] not in res:
-                        #print(temp_path, home_path, temp_path.split(home_path.split(',')[0]+'\\')[-1].split('\\',1)[0])
-                        res[fileinfo['表名']] = {'parent':temp_path.split(home_path.split(',')[0]+'\\')[-1].split('\\',1)[0],'files':{},'passwds':'','sheetName':fileinfo['sheetName']}
-                    res[fileinfo['表名']]['files'].update({'_'.join(list(fileinfo.values())[1:]):temp_path})
-                    if ',' in path:
-                        res[fileinfo['表名']]['passwds']=path.split(',')[1]
+    dirlist = os.listdir(path.split(',')[0])
+    dirlist = list(filter(lambda x:'.json' not in x and 'bak' not in x and 'Bak' not in x and 'BAK' not in x and '~' not in x and '表格解析配置' not in x, dirlist))
+    for f in natsort.natsorted(dirlist):
+        temp_path = os.path.join(path.split(',')[0], f)
+        if os.path.isdir(temp_path):
+            listDataDir(temp_path, res, home_path)
+        else:
+            for info in getTableInfoFromFileName(temp_path):
+                fileinfo = info[0]
+                if fileinfo['表名'] not in res:
+                    res[fileinfo['表名']] = {'parent':temp_path.split(home_path.split(',')[0]+'\\')[-1].split('\\',1)[0],'files':{},'passwds':'','sheetName':fileinfo['sheetName']}
+                res[fileinfo['表名']]['files'].update({'_'.join(list(fileinfo.values())[1:]):temp_path})
+                if ',' in path:
+                    res[fileinfo['表名']]['passwds']=path.split(',')[1]
 
 def loadData(refresh = False):
     '''
-    加载数据库表：如果有新的数据文件，则重新读取所有数据文件结构；否则，直接读取表格配置文件
+    加载数据库表配置文件tables.json：如果有新的数据文件，则重新读取所有数据文件结构；否则，直接读取表格配置文件.
+    Inputs:
+        refresh:用于控制是否强制更新tables.json配置文件。当解压一些文件时，可能会出现文件更新时间仍小于配置文件时间的问题，这种情况下，可以强制刷新。
     Returns:
-      DataBase:数据表:{'表名':{'parent':'文件夹','files':[]}}
+        DataBase:数据表:{'表名':{'parent':'文件夹','files':[]}}
     '''
     config = ConfigParser()
     config.read(os.path.join(os.path.dirname(__file__),'config\\config.ini'), encoding='utf-8')
@@ -138,19 +131,12 @@ def loadData(refresh = False):
     
     update = False
     for key in config.options("data_dir"):
+        #逐个判断各个文件夹下数据表是否有更新
         currentDataBase= {}
-        if 'ops.'!=key[:4] and (refresh or judgeIfcomeinNew(config["data_dir"][key],os.path.join(os.path.dirname(__file__),'config\\tables.json'))):
+        if refresh or judgeIfcomeinNew(config["data_dir"][key],os.path.join(os.path.dirname(__file__),'config\\tables.json')):
             listDataDir(config["data_dir"][key], currentDataBase, config["data_dir"][key])
             DataBase.update(currentDataBase)
             update = True
-        elif 'ops.'==key[:4] and refresh:
-            currentDataBase[key.split('.')[2]]={'parent':key[4:].split('.')[1],'files':{},'passwds':''}
-            currentDataBase[key.split('.')[2]]['files'].update({'ops':config["data_dir"][key].split(',')[0]})
-            currentDataBase[key.split('.')[2]]['passwds']=config["data_dir"][key].split(',',1)[1]
-            DataBase.update(currentDataBase)
-            update = True
-        else:
-            pass
 
     if update:
         with open(os.path.join(os.path.dirname(__file__),'config\\tables.json'), 'w', encoding='utf-8') as f:
@@ -160,12 +146,13 @@ def loadData(refresh = False):
 
 def listViewDir(path, res):
     '''
+    递归遍历视图目录下的sql文件，将“文件名->视图名”转换为“视图名->文件1”。
+    与ListDataDir的方式是相同的，不再做二级目录配置，故不需要home_path参数；也没有1对多个文件的关系，只有1对1。
+    Inpust:
+        path:某个文件夹
+        res:实际返回的数据结构
     Returns:
-    database={table1:{'parent':'\子目录','files':{key1:file1,key2:file2}}
-    DataBase的结构:
-    1)有哪些数据表
-    2)每个数据表对应的文件列表，不同文件的区分方式
-    与原Excel组织方式的不同：不再关心数据的层次关系，即不再关系目录
+        res={view1:{'parent':'\子目录','file':file1}}
     '''
     dirlist = os.listdir(path)
     dirlist = list(filter(lambda x:'.json' not in x and 'bak' not in x and 'Bak' not in x and 'BAK' not in x and '~' not in x and '表格解析配置' not in x and 'xls' not in x, dirlist))
@@ -181,7 +168,8 @@ def loadView(refresh = False):
     '''
     加载快报视图表：如果有新的视图文件，则重新读取所有数据文件结构；否则，直接读取表格配置文件
     Returns:
-      ViewBase:数据表:{'表名':{'parent':'文件夹','files':[]}}
+      ViewBase:数据表:{'表名':{'parent':'文件夹','file':file1,'index':,'columns':'','values':,'alias':'';}}
+      后面四个参数，用于根据视图报表配置，自动生成分组报表（数据透视表）。
     '''
     config = ConfigParser()
     config.read(os.path.join(os.path.dirname(__file__),'config\\config.ini'), encoding='utf-8')
@@ -195,11 +183,7 @@ def loadView(refresh = False):
         currentViewBase = {}
         if refresh or judgeIfcomeinNew(config["view_dir"][key],os.path.join(os.path.dirname(__file__),'config\\views.json')):
             listViewDir(config["view_dir"][key], currentViewBase)
-            if config.get("public_config","using_file")=='True':
-                df = pd.read_excel(os.path.join(config["public_config"]["config_path"], config["public_config"]["view_config_file"]),index_col=0)
-            else:
-                df = pd.DataFrame(get_opsData(config["public_config_ops"]["appkey"], config["public_config_ops"]["sign"], config["public_config_ops"]["view_config"].split(',')[0], config["public_config_ops"]["view_config"].split(',')[1]))
-                df.set_index('视图名', inplace=True)
+            df = pd.read_excel(os.path.join(config["public_config"]["config_path"], config["public_config"]["view_config_file"]),index_col=0)
             for view in currentViewBase.keys():
                 if view in df.index.tolist():
                     currentViewBase[view]['index'] = df.loc[view]['行字段'].split(',')
@@ -218,32 +202,19 @@ def loadView(refresh = False):
 
 def updateConfig(viewID, userName):
     '''
-    根据低码端的配置，为不同的使用者，进行不同的配置。
+    根据其他数据源的配置，为不同的使用者，进行不同的配置。
     Inputs:
         viewID:
         userName:
     '''
-    appKey = '6b014274c34294d5'
-    sign = 'ZTc3NmI0OWQ2NDkxYjkzNGY2MmMzODQ3YWQ1NTUzOTE3MGQ1Y2U1NmQ4MWFkZTBmYjAzMjYxMmE0ODFmMWMyZQ=='
-    rs = get_opsData(appKey, sign, '64cb6dc6b4448501e994f735', viewID)
 
     config = ConfigParser()
     config.read(os.path.join(os.path.dirname(__file__),'config\\config.ini'), encoding='utf-8')
 
-    for d in rs:
-        if 'ops.' not in d['数据分类']:
-            config.set('data_dir', d['数据分类'] + '.' +  d['文件夹'].rsplit('\\',1)[1], d['文件夹'].rsplit('\\',1)[0]+ ',' + d['key'])
-            if d['key']:
-                config.set('password', d['数据分类'] + d['文件夹'].rsplit('\\',1)[1], d['key'])
-        else:
-            config.set('data_dir', d['数据分类'] + '.' +  d['文件名'], d['文件夹'] + ',' + d['key'])
-        
-
-    #再更新View配置，避免展示过多无用的配置
-    rs = get_opsData(appKey, sign, '64ccbfeeb4448501e994f86d', '64ccbfeeb4448501e994f877')
-    for d in rs:
-        if userName in ','.join(u['fullname'] for u in json.loads(d['报表使用者'])):
-            config.set('view_dir', d['视图分类'], d['文件夹'].rsplit('\\',1)[0])
+    '''
+    省略代码：管理员用于分派数据时，自行规划。用于多个人共享数据时，为不同的人分配不同的数据、视图权限。
+    更新目标为用户的config.ini文件。
+    '''
 
     with open(os.path.join(os.path.dirname(__file__),'config\\config.ini'), 'w', encoding='utf-8') as f:
         config.write(f)    
@@ -261,8 +232,6 @@ def load(refresh = False, viewID = '', userName = ''):
     if refresh:
         xw.apps.active.alert("更新完成，开始使用吧！")
     
-
-
 def read_excel_with_password(file):
     config = ConfigParser()
     config.read(os.path.join(os.path.dirname(__file__),'config\\config.ini'), encoding='utf-8')
