@@ -2,10 +2,8 @@ import natsort
 import os
 import io
 import pandas as pd
-import json
 import re
 import msoffcrypto
-import xlwings as xw
 
 '''
 首先，你需要定义你的不同的Excel。定义的方式为：根据“文件名+sheet名”映射到某一个表名，如将满足“文件名匹配'.*工作记录表-(.*?)-(\d{8})'且sheetName='工作记录'”的excel，定义为表“员工每日工作记录表”。
