@@ -12,9 +12,16 @@ import xlwings as xw
 后续将可以通过“select * from 员工每日工作记录表”获取全部类似Excel的数据。
 文件名支持正则，sheetName暂不支持正则。
 '''
+
+
 def judgeIfcomeinNew(path, tablefile):
     """
-    判断数据表的配置是否是最新的，如果不是，则更新
+    用于判断path目录下的各个文件，和配置文件tablefile谁更新。如果path目录下的文件更新，则需要更新配置文件。
+    Inputs:
+        path:数据文件所在的路径
+        tablefile:每次更新配置，生成的tables.json文件。该文件记录每个“数据库表名”对应的Excel的文件列表。
+    Returns:
+        True/False:如果为True，提示有文件发生更新，可能有新增文件，要更新配置文件。
     """
     newest_time = os.path.getmtime(tablefile)
     for root, dirs, files in os.walk(path):
@@ -26,7 +33,7 @@ def judgeIfcomeinNew(path, tablefile):
 
 def getTableInfoFromFileName(filename, sheetName=0):
     """
-    用于根据文件名
+    用于建立“文件名+sheet名”到“数据库表名”的映射关系。
     filename为文件的绝对路径; home_path用来获取根目录，用于支持子文件夹的情况; name为文件名或二级子目录+文件名；
     sheetName=0,表示不要求填sheetName,直接取默认的第1个Sheet,用于获取配置信息、或读文件时sheetName为空的情况。
     返回：
